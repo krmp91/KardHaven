@@ -9,10 +9,12 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../lib/AuthProvider';
+import { useLanguage } from '../lib/i18n';
 import { colors } from '../lib/theme';
 
 export default function Login() {
   const { session, loading, signIn, signUp } = useAuth();
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<'signIn' | 'signUp'>('signIn');
@@ -39,18 +41,18 @@ export default function Login() {
     if (result.error) {
       setError(result.error);
     } else if (mode === 'signUp') {
-      setError('Check your email to confirm your account, then sign in.');
+      setError(t('login.confirmEmailNotice'));
     }
   };
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>KardHaven</Text>
-      <Text style={styles.subtitle}>{mode === 'signIn' ? 'Log ind' : 'Opret bruger'}</Text>
+      <Text style={styles.subtitle}>{mode === 'signIn' ? t('login.signIn') : t('login.signUp')}</Text>
 
       <TextInput
         style={styles.input}
-        placeholder="Email"
+        placeholder={t('login.emailPlaceholder')}
         placeholderTextColor={colors.textMuted}
         autoCapitalize="none"
         keyboardType="email-address"
@@ -59,7 +61,7 @@ export default function Login() {
       />
       <TextInput
         style={styles.input}
-        placeholder="Password"
+        placeholder={t('login.passwordPlaceholder')}
         placeholderTextColor={colors.textMuted}
         secureTextEntry
         value={password}
@@ -72,7 +74,7 @@ export default function Login() {
         {submitting ? (
           <ActivityIndicator color={colors.onAccent} />
         ) : (
-          <Text style={styles.buttonText}>{mode === 'signIn' ? 'Log ind' : 'Opret bruger'}</Text>
+          <Text style={styles.buttonText}>{mode === 'signIn' ? t('login.signIn') : t('login.signUp')}</Text>
         )}
       </Pressable>
 
@@ -83,7 +85,7 @@ export default function Login() {
           setMode(mode === 'signIn' ? 'signUp' : 'signIn');
         }}
       >
-        {mode === 'signIn' ? 'Ny bruger? Opret konto' : 'Har du allerede en konto? Log ind'}
+        {mode === 'signIn' ? t('login.newUserPrompt') : t('login.hasAccountPrompt')}
       </Text>
     </View>
   );

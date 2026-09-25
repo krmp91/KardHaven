@@ -2,10 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { Redirect, Tabs } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 import { useAuth } from '../../lib/AuthProvider';
+import { useLanguage } from '../../lib/i18n';
 import { colors } from '../../lib/theme';
 
 export default function TabsLayout() {
   const { session, loading } = useAuth();
+  const { t } = useLanguage();
 
   if (loading) {
     return (
@@ -32,28 +34,28 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Samling',
+          title: t('tabs.collection'),
           tabBarIcon: ({ color, size }) => <Ionicons name="albums" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="search"
         options={{
-          title: 'Søg',
+          title: t('tabs.search'),
           tabBarIcon: ({ color, size }) => <Ionicons name="search" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="wishlist"
         options={{
-          title: 'Ønskeliste',
+          title: t('tabs.wishlist'),
           tabBarIcon: ({ color, size }) => <Ionicons name="heart" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profil',
+          title: t('tabs.profile'),
           tabBarIcon: ({ color, size }) => <Ionicons name="person" color={color} size={size} />,
         }}
       />

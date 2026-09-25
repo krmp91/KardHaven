@@ -1,8 +1,8 @@
-import { FunctionsHttpError } from '@supabase/supabase-js';
-import { Redirect, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -10,53 +10,33 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useAuth } from '../../lib/AuthProvider';
 import { CARD_CONDITIONS, CARD_LANGUAGES, CardCondition, CardFinish, CardLanguage } from '../../lib/catalog';
 import { useLanguage } from '../../lib/i18n';
 import { supabase } from '../../lib/supabase';
-import { cardImageUrl, tcgdex } from '../../lib/tcgdex';
+import { cardImageUrl } from '../../lib/tcgdex';
 import { colors } from '../../lib/theme';
 
-type TCGdexCard = {
+const FINISHES: CardFinish[] = ['normal', 'holo', 'reverse_holo', 'other'];
+
+type CollectionItemDetail = {
   id: string;
-  name: string;
-  image?: string;
-  rarity?: string;
-  localId?: string;
-  types?: string[];
-  hp?: number;
-  set: {
-    id: string;
+  quantity: number;
+  variant: CardFinish;
+  condition: CardCondition | null;
+  language: CardLanguage;
+  cards: {
     name: string;
-    logo?: string;
-    symbol?: string;
-    cardCount?: { official?: number; total?: number };
-  };
-  variants?: {
-    normal?: boolean;
-    holo?: boolean;
-    reverse?: boolean;
-    firstEdition?: boolean;
-    wPromo?: boolean;
-  };
+    image_url: string | null;
+    sets: { name: string } | null;
+  } | null;
 };
 
-function availableFinishes(variants: TCGdexCard['variants']): CardFinish[] {
-  if (!variants) return ['normal'];
-  const finishes: CardFinish[] = [];
-  if (variants.normal) finishes.push('normal');
-  if (variants.holo) finishes.push('holo');
-  if (variants.reverse) finishes.push('reverse_holo');
-  if (finishes.length === 0) finishes.push('other');
-  return finishes;
-}
-
-export default function CardDetail() {
+export default function EditCollectionItem() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { session } = useAuth();
+  const router = useRouter();
   const { t } = useLanguage();
 
-  const [card, setCard] = useState<TCGdexCard | null>(null);
+  const [item, setItem] = useState<CollectionItemDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,39 +44,39 @@ export default function CardDetail() {
   const [condition, setCondition] = useState<CardCondition | null>(null);
   const [cardLanguage, setCardLanguage] = useState<CardLanguage>('EN');
   const [quantity, setQuantity] = useState(1);
-  const [adding, setAdding] = useState(false);
-  const [addResult, setAddResult] = useState<'ok' | 'error' | null>(null);
-  const [imageFailed, setImageFailed] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    tcgdex.card
-      .get(id)
-      .then((result) => {
-        if (cancelled) return;
-        const fetched = result as unknown as TCGdexCard;
-        setCard(fetched);
-        setFinish(availableFinishes(fetched.variants)[0]);
-      })
-      .catch((err) => {
-        console.error('Failed to fetch card detail:', id, err);
-        if (!cancelled) setError(`${t('card.loadErrorPrefix')}: ${err?.message ?? '?'}`);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+
+    (async () => {
+      setLoading(true);
+      setError(null);
+      const { data, error: fetchError } = await supabase
+        .from('collection_items')
+        .select('id, quantity, variant, condition, language, cards(name, image_url, sets(name))')
+        .eq('id', id)
+        .single();
+
+      if (cancelled) return;
+      if (fetchError || !data) {
+        setError(t('collection.notFound'));
+      } else {
+        const fetched = data as unknown as CollectionItemDetail;
+        setItem(fetched);
+        setFinish(fetched.variant);
+        setCondition(fetched.condition);
+        setCardLanguage(fetched.language);
+        setQuantity(fetched.quantity);
+      }
+      setLoading(false);
+    })();
+
     return () => {
       cancelled = true;
     };
   }, [id]);
-
-  const finishes = useMemo(() => availableFinishes(card?.variants), [card]);
-
-  if (!session) {
-    return <Redirect href="/login" />;
-  }
 
   if (loading) {
     return (
@@ -106,81 +86,72 @@ export default function CardDetail() {
     );
   }
 
-  if (error || !card) {
+  if (error || !item) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.error}>{error ?? t('card.notFound')}</Text>
+        <Text style={styles.error}>{error ?? t('collection.notFound')}</Text>
       </View>
     );
   }
 
-  const handleAdd = async () => {
-    setAdding(true);
-    setAddResult(null);
+  const handleSave = async () => {
+    setSaving(true);
+    const { error: updateError } = await supabase
+      .from('collection_items')
+      .update({ variant: finish, condition, language: cardLanguage, quantity })
+      .eq('id', id);
+    setSaving(false);
 
-    const { error: syncError } = await supabase.functions.invoke('sync-card', {
-      body: { cardId: card.id },
-    });
-
-    if (syncError) {
-      console.error('sync-card invoke error:', syncError);
-      if (syncError instanceof FunctionsHttpError) {
-        try {
-          console.error('sync-card error body:', await syncError.context.json());
-        } catch (e) {
-          console.error('sync-card error body (not JSON):', await syncError.context.text().catch(() => '?'));
-        }
-      }
-      setAdding(false);
-      setAddResult('error');
+    if (updateError) {
+      console.error('collection_items update error:', updateError);
+      Alert.alert(t('collection.saveError'));
       return;
     }
+    router.back();
+  };
 
-    const { error: insertError } = await supabase.from('collection_items').insert({
-      user_id: session!.user.id,
-      card_id: card.id,
-      quantity,
-      variant: finish,
-      condition,
-      language: cardLanguage,
-    });
+  const handleDelete = () => {
+    Alert.alert(t('collection.deleteConfirmTitle'), t('collection.deleteConfirmMessage'), [
+      { text: t('collection.deleteConfirmCancel'), style: 'cancel' },
+      {
+        text: t('collection.deleteConfirmConfirm'),
+        style: 'destructive',
+        onPress: async () => {
+          setDeleting(true);
+          const { error: deleteError } = await supabase
+            .from('collection_items')
+            .delete()
+            .eq('id', id);
+          setDeleting(false);
 
-    if (insertError) {
-      console.error('collection_items insert error:', insertError);
-    }
-
-    setAdding(false);
-    setAddResult(insertError ? 'error' : 'ok');
+          if (deleteError) {
+            console.error('collection_items delete error:', deleteError);
+            Alert.alert(t('collection.deleteError'));
+            return;
+          }
+          router.back();
+        },
+      },
+    ]);
   };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {card.image && !imageFailed ? (
+      {item.cards?.image_url ? (
         <Image
-          source={{ uri: cardImageUrl(card.image, 'high') }}
+          source={{ uri: cardImageUrl(item.cards.image_url, 'high') }}
           style={styles.image}
           resizeMode="contain"
-          onError={(e) => {
-            console.error('Failed to load card image:', card.image, e.nativeEvent.error);
-            setImageFailed(true);
-          }}
         />
-      ) : card.image && imageFailed ? (
-        <View style={[styles.image, styles.imageFallback]}>
-          <Text style={styles.error}>{t('card.imageError')}</Text>
-        </View>
       ) : null}
 
-      <Text style={styles.name}>{card.name}</Text>
-      <Text style={styles.setName}>
-        {card.set.name} · #{card.localId}
-      </Text>
-      {card.rarity && <Text style={styles.rarity}>{card.rarity}</Text>}
+      <Text style={styles.name}>{item.cards?.name ?? t('collection.unknownCard')}</Text>
+      {item.cards?.sets?.name && <Text style={styles.setName}>{item.cards.sets.name}</Text>}
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>{t('card.variantLabel')}</Text>
         <View style={styles.chipRow}>
-          {finishes.map((f) => (
+          {FINISHES.map((f) => (
             <Pressable
               key={f}
               style={[styles.chip, finish === f && styles.chipActive]}
@@ -240,16 +211,21 @@ export default function CardDetail() {
         </View>
       </View>
 
-      <Pressable style={styles.addButton} onPress={handleAdd} disabled={adding}>
-        {adding ? (
+      <Pressable style={styles.saveButton} onPress={handleSave} disabled={saving || deleting}>
+        {saving ? (
           <ActivityIndicator color={colors.onAccent} />
         ) : (
-          <Text style={styles.addButtonText}>{t('card.addButton')}</Text>
+          <Text style={styles.saveButtonText}>{t('collection.saveButton')}</Text>
         )}
       </Pressable>
 
-      {addResult === 'ok' && <Text style={styles.success}>{t('card.addSuccess')}</Text>}
-      {addResult === 'error' && <Text style={styles.error}>{t('card.addError')}</Text>}
+      <Pressable style={styles.deleteButton} onPress={handleDelete} disabled={saving || deleting}>
+        {deleting ? (
+          <ActivityIndicator color={colors.warning} />
+        ) : (
+          <Text style={styles.deleteButtonText}>{t('collection.deleteButton')}</Text>
+        )}
+      </Pressable>
     </ScrollView>
   );
 }
@@ -272,28 +248,17 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   image: {
-    width: '80%',
+    width: '60%',
     aspectRatio: 5 / 7,
   },
-  imageFallback: {
-    backgroundColor: colors.surface,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-  },
   name: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '800',
     color: colors.text,
     textAlign: 'center',
   },
   setName: {
     color: colors.textMuted,
-  },
-  rarity: {
-    color: colors.favorite,
-    fontWeight: '600',
   },
   section: {
     width: '100%',
@@ -351,7 +316,7 @@ const styles = StyleSheet.create({
     minWidth: 24,
     textAlign: 'center',
   },
-  addButton: {
+  saveButton: {
     marginTop: 20,
     width: '100%',
     backgroundColor: colors.success,
@@ -359,13 +324,22 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
   },
-  addButtonText: {
+  saveButtonText: {
     color: colors.onAccent,
     fontWeight: '700',
   },
-  success: {
-    color: colors.success,
-    fontWeight: '600',
+  deleteButton: {
+    marginTop: 12,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: colors.warning,
+    borderRadius: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  deleteButtonText: {
+    color: colors.warning,
+    fontWeight: '700',
   },
   error: {
     color: colors.warning,
